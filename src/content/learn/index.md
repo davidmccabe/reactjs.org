@@ -4,7 +4,7 @@ title: Quick Start
 
 Have a look at the result:
 
-<Sandpack>
+<Sandpack serverComponents={true}>
 
 ```js
 function MyButton() {
