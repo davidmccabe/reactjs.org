@@ -85,20 +85,128 @@ ul {
 
 const SCRIPT_CODE = `
 
+const webpack = require("webpack");
+const ReactServerWebpackPlugin = require("react-server-dom-webpack/plugin");
+const path = require("path");
+
+async function build() {
+  return new Promise((resolve, reject) => {
+    webpack(
+      {
+        mode: "development",
+        devtool: "cheap-module-source-map",
+        entry: [path.resolve(__dirname, "./server.js")],
+        output: {
+          path: path.resolve(__dirname, "./build"),
+          filename: "main.js",
+        },
+        module: {
+          rules: [
+            {
+              test: /\.js$/,
+              use: "babel-loader",
+              exclude: /node_modules/,
+            },
+          ],
+        },
+        plugins: [
+          new ReactServerWebpackPlugin({ isServer: false }),
+        ],
+      },
+      (err, stats) => {
+        if (err) {
+          console.error(err.stack || err);
+          if (err.details) {
+            console.error(err.details);
+          }
+          reject();
+        }
+        if (stats?.hasErrors()) {
+          console.log("Finished running webpack with errors.");
+          const info = stats.toJson();
+          info.errors.forEach((e) => console.error(e));
+          reject();
+        } else {
+          console.log("Finished running webpack.");
+          resolve();
+        }
+      }
+    );
+  });
+}
+
+
 const http = require('http');
+const fs = require('fs');
 
-const hostname = '127.0.0.1';
-const port = 3000;
+async function main() {
+  await build();
 
-const server = http.createServer((req, res) => {
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/html');
-  res.end('RSC server');
-});
+  const hostname = '127.0.0.1';
+  const port = 1234;
 
-server.listen(port, hostname, () => {
+  async function serveIndex(req, res) {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/html');
+    // const fileContents = await fs.readFile(path.resolve(__dirname, "./serverIndex.html"), 'utf8');
+    const fileContents = \`<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="description" content="React with Server Components demo">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="style.css" />
+    <title>React Notes</title>
+  <script defer src="main.js"></script></head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // In development, we restart the server on every edit.
+      // For the purposes of this demo, retry fetch automatically.
+      let nativeFetch = window.fetch;
+      window.fetch = async function fetchWithRetry(...args) {
+        for (let i = 0; i < 4; i++) {
+          try {
+            return await nativeFetch(...args);
+          } catch (e) {
+            if (args[1] && args[1].method !== 'GET') {
+              // Don't retry mutations to avoid confusion
+              throw e;
+            }
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+        return nativeFetch(...args);
+      }
+    </script>
+  </body>
+</html>
 
-});
+
+    \`
+    res.end(fileContents)
+  }
+
+  async function serveScript(req, res) {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/javascript');
+    const fileContents = fs.readFileSync(path.resolve(__dirname, "./build/main.js"), 'utf8');
+    res.end(fileContents)
+  }
+
+  const server = http.createServer(async (req, res) => {    
+    switch (req.url) {
+      case '/':
+        return serveIndex(req, res);
+      case '/main.js':
+        return serveScript(req, res);
+    }
+  });
+
+  server.listen(port, hostname);
+}
+
+main();
 `;
 
 const SERVER_CODE = `
@@ -106,8 +214,37 @@ console.log("The server code is run");
 `;
 
 const HTML_CODE = `
-<html>
-hi
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="description" content="React with Server Components demo">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="style.css" />
+    <title>React Notes</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // In development, we restart the server on every edit.
+      // For the purposes of this demo, retry fetch automatically.
+      let nativeFetch = window.fetch;
+      window.fetch = async function fetchWithRetry(...args) {
+        for (let i = 0; i < 4; i++) {
+          try {
+            return await nativeFetch(...args);
+          } catch (e) {
+            if (args[1] && args[1].method !== 'GET') {
+              // Don't retry mutations to avoid confusion
+              throw e;
+            }
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+        return nativeFetch(...args);
+      }
+    </script>
+  </body>
 </html>
 `;
 
@@ -272,11 +409,11 @@ function SandboxShell({
         )}>
         <Editor lintExtensions={lintExtensions} />
         {/* This preview is broken: */}
-        <Preview
+        {/* <Preview
           className="order-last xl:order-2"
           isExpanded={isExpanded}
           lintErrors={lintErrors}
-        />
+        /> */}
         {/* this preview works: */}
         <SandpackPreview />
       </SandpackLayout>
