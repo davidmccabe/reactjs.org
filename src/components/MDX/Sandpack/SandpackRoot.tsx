@@ -10,6 +10,8 @@ import {CustomPreset} from './CustomPreset';
 import {createFileMap} from './createFileMap';
 import {CustomTheme} from './Themes';
 
+import {Sandpack} from '@codesandbox/sandpack-react';
+
 import {
   SandpackLayout,
   SandpackCodeEditor,
@@ -84,10 +86,29 @@ ul {
 `.trim();
 
 const SCRIPT_CODE = `
+// process.exit(2);
+
+// TODO learn what this does.
+const register = require('react-server-dom-webpack/node-register');
+register();
+const babelRegister = require('@babel/register');
+babelRegister({
+  ignore: [/[\\\/](build|server|node_modules)[\\\/]/],
+  presets: [['@babel/preset-react', {runtime: 'automatic'}]],
+  plugins: ['@babel/transform-modules-commonjs'],
+});
 
 const webpack = require("webpack");
 const ReactServerWebpackPlugin = require("react-server-dom-webpack/plugin");
 const path = require("path");
+const React = require('react');
+const ClientRoot = require('./ClientRoot.js').default;
+
+
+
+
+const {renderToPipeableStream} = require('react-server-dom-webpack/server.node');
+
 
 async function build() {
   return new Promise((resolve, reject) => {
@@ -135,6 +156,44 @@ async function build() {
   });
 }
 
+async function serveIndex(req, res) {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/html');
+  const fileContents = await fs.readFile(path.resolve(__dirname, "./serverIndex.html"), 'utf8');
+  res.end(fileContents)
+}
+
+async function serveScript(req, res) {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/javascript');
+  const fileContents = await fs.readFile(path.resolve(__dirname, "./build/main.js"), 'utf8');
+  res.end(fileContents)
+}
+
+async function serveScriptClient0(req, res) {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/javascript');
+  const fileContents = await fs.readFile(path.resolve(__dirname, "./build/client0.main.js"), 'utf8');
+  res.end(fileContents)
+}
+
+async function serveReact(req, res) {
+  // TODO get props from the query.
+  // const location = JSON.parse(req.query.location);
+  // res.set('X-Location', JSON.stringify(location));
+  const props = {};
+
+  const manifest = await fs.readFile(
+    path.resolve(__dirname, './build/react-client-manifest.json'),
+    'utf8'
+  );
+  const moduleMap = JSON.parse(manifest);
+  const {pipe} = renderToPipeableStream(
+    React.createElement(ClientRoot, props),
+    moduleMap
+  );
+  pipe(res);
+}
 
 const http = require('http');
 const fs = require('fs').promises;
@@ -145,26 +204,16 @@ async function main() {
   const hostname = '127.0.0.1';
   const port = 1234;
 
-  async function serveIndex(req, res) {
-    res.statusCode = 200;
-    res.setHeader('Content-Type', 'text/html');
-    const fileContents = await fs.readFile(path.resolve(__dirname, "./serverIndex.html"), 'utf8');
-    res.end(fileContents)
-  }
-
-  async function serveScript(req, res) {
-    res.statusCode = 200;
-    res.setHeader('Content-Type', 'text/javascript');
-    const fileContents = await fs.readFile(path.resolve(__dirname, "./build/main.js"), 'utf8');
-    res.end(fileContents)
-  }
-
-  const server = http.createServer(async (req, res) => {    
+  const server = http.createServer(async (req, res) => {
     switch (req.url) {
       case '/':
         return serveIndex(req, res);
       case '/main.js':
         return serveScript(req, res);
+      case '/client0.main.js':
+        return serveScriptClient0(req, res);
+     case '/react':
+        return serveReact(req, res);
     }
   });
 
@@ -175,8 +224,147 @@ main();
 `;
 
 const SERVER_CODE = `
-console.log("The server code is run");
+console.log("server root module executed");
+
+import { createRoot } from "react-dom/client";
+import { ErrorBoundary } from "react-error-boundary";
+import { Router } from "./router";
+
+const root = createRoot(document.getElementById("root"));
+root.render(<Root />);
+
+function Root() {
+  return (
+    <ErrorBoundary FallbackComponent={Error}>
+      <Router />
+    </ErrorBoundary>
+  );
+}
+
+function Error({ error }) {
+  return (
+    <div>
+      <h1>Application Error</h1>
+      <pre style={{ whiteSpace: "pre-wrap" }}>{error.stack}</pre>
+    </div>
+  );
+}
 `;
+
+const ROUTER_CODE = `
+"use client";
+
+console.log("router module executed");
+
+import {
+  createContext,
+  startTransition,
+  useContext,
+  useState,
+  use,
+} from "react";
+import {
+  createFromFetch,
+  createFromReadableStream,
+} from "react-server-dom-webpack/client";
+
+const RouterContext = createContext();
+const initialCache = new Map();
+
+export function Router() {
+  console.log("router was executed");
+
+  const [cache, setCache] = useState(initialCache);
+  // TODO remove app-specific attributes
+  const [location, setLocation] = useState({
+    selectedId: null,
+    isEditing: false,
+    searchText: "",
+  });
+
+  const locationKey = JSON.stringify(location);
+  let content = cache.get(locationKey);
+  if (!content) {
+    content = createFromFetch(
+      fetch("/react")
+    );
+    cache.set(locationKey, content);
+  }
+
+  function refresh(response) {
+    startTransition(() => {
+      const nextCache = new Map();
+      if (response != null) {
+        const locationKey = response.headers.get("X-Location");
+        const nextLocation = JSON.parse(locationKey);
+        const nextContent = createFromReadableStream(response.body);
+        nextCache.set(locationKey, nextContent);
+        navigate(nextLocation);
+      }
+      setCache(nextCache);
+    });
+  }
+
+  function navigate(nextLocation) {
+    startTransition(() => {
+      setLocation((loc) => ({
+        ...loc,
+        ...nextLocation,
+      }));
+    });
+  }
+
+  return (
+    <RouterContext.Provider value={{ location, navigate, refresh }}>
+      <p>This is the router.</p>
+      {use(content)}
+    </RouterContext.Provider>
+  );
+}
+
+export function useRouter() {
+  return useContext(RouterContext);
+}
+
+export function useMutation({ endpoint, method }) {
+  const { refresh } = useRouter();
+  const [isSaving, setIsSaving] = useState(false);
+  const [didError, setDidError] = useState(false);
+  const [error, setError] = useState(null);
+  if (didError) {
+    // Let the nearest error boundary handle errors while saving.
+    throw error;
+  }
+
+  async function performMutation(payload, requestedLocation) {
+    setIsSaving(true);
+    try {
+      const response = await fetch(
+        \`\${endpoint}?location=\${encodeURIComponent(
+          JSON.stringify(requestedLocation)
+        )}\`,
+        {
+          method,
+          body: JSON.stringify(payload),
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      refresh(response);
+    } catch (e) {
+      setDidError(true);
+      setError(e);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return [isSaving, performMutation];
+}`;
 
 const HTML_CODE = `
 <!DOCTYPE html>
@@ -186,7 +374,7 @@ const HTML_CODE = `
     <meta name="description" content="React with Server Components demo">
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="style.css" />
-    <title>React Notes</title>
+    <title>Demo</title>
     <script defer src="main.js"></script>
   </head>
   <body>
@@ -214,6 +402,18 @@ const HTML_CODE = `
 </html>
 `;
 
+const CLIENT_ROOT = `
+"use client";
+
+console.log("ClientRoot module evaluated");
+
+export default function ClientRoot({}) {
+  return <p>This is a client component</p>;
+}
+`;
+
+
+
 function SandpackRoot(props: SandpackProps) {
   let {children, autorun = true, serverComponents = false} = props;
   const codeSnippets = Children.toArray(children) as React.ReactElement[];
@@ -233,8 +433,16 @@ function SandpackRoot(props: SandpackProps) {
       code: SERVER_CODE,
       hidden: true,
     };
+    files['router.js'] = {
+      code: ROUTER_CODE,
+      hidden: true,
+    };
     files['serverIndex.html'] = {
       code: HTML_CODE,
+      hidden: true,
+    };
+    files['ClientRoot.js'] = {
+      code: CLIENT_ROOT,
       hidden: true,
     };
     files['package.json'] = {
@@ -247,10 +455,6 @@ function SandpackRoot(props: SandpackProps) {
           'acorn-jsx': '^5.3.2',
           'acorn-loose': '^8.3.0',
           'babel-loader': '8.3.0',
-          compression: '^1.7.4',
-          concurrently: '^7.6.0',
-          excerpts: '^0.0.3',
-          express: '^4.18.2',
           'html-webpack-plugin': '5.5.0',
           react: '18.3.0-next-1308e49a6-20230330',
           'react-dom': '18.3.0-next-1308e49a6-20230330',
@@ -262,20 +466,17 @@ function SandpackRoot(props: SandpackProps) {
           'server-only': '^0.0.1',
           webpack: '5.76.2',
         },
-        devDependencies: {
-          '@types/node': '^20.2.3',
-          'cross-env': '^7.0.3',
-          nodemon: '^2.0.21',
-          prettier: '1.19.1',
+        "babel": {
+          "presets": [
+            [
+              "@babel/preset-react",
+              {
+                "runtime": "automatic"
+              }
+            ]
+          ]
         },
-        // "scripts": {
-        //   "start": "concurrently \"yarn run server:dev\" \"yarn run bundler:dev\"",
-        //   "start:prod": "concurrently \"yarn run server:prod\" \"yarn run bundler:prod\"",
-        //   "server:dev": "cross-env NODE_ENV=development nodemon -- --conditions=react-server server",
-        //   "server:prod": "cross-env NODE_ENV=production nodemon -- --conditions=react-server server",
-        //   "bundler:dev": "cross-env NODE_ENV=development nodemon -- scripts/build.js",
-        //   "bundler:prod": "cross-env NODE_ENV=production nodemon -- scripts/build.js"
-        // },
+        // scripts: {start: 'node -C foo script.js'},
         scripts: {start: 'node script.js'},
         main: 'script.js',
       }),
@@ -310,15 +511,21 @@ function SandpackRoot(props: SandpackProps) {
 
   return (
     <div className="sandpack sandpack--playground w-full my-8" dir="ltr">
-      <SandpackProvider
+      {/* <Sandpack 
+      template={template}
+      files={files}
+      theme={CustomTheme}
+      options={options}
+      customSetup={customSetup} /> */}
+       <SandpackProvider
         template={template}
         files={files}
         theme={CustomTheme}
         options={options}
-        customSetup={customSetup}>
+        customSetup={customSetup}> 
         <Contents providedFiles={Object.keys(files)} />
         {/* <CustomPreset providedFiles={Object.keys(files)} /> */}
-      </SandpackProvider>
+      </SandpackProvider> 
     </div>
   );
 }
