@@ -102,9 +102,7 @@ const webpack = require("webpack");
 const ReactServerWebpackPlugin = require("react-server-dom-webpack/plugin");
 const path = require("path");
 const React = require('react');
-const ClientRoot = require('./ClientRoot.js').default;
-
-
+const ClientRoot = require('./App.js').default;
 
 
 const {renderToPipeableStream} = require('react-server-dom-webpack/server.node');

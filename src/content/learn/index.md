@@ -7,6 +7,8 @@ Have a look at the result:
 <Sandpack serverComponents={true}>
 
 ```js
+"use client";
+
 function MyButton() {
   return (
     <button>
