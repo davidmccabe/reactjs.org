@@ -109,7 +109,7 @@ const {renderToPipeableStream} = require('react-server-dom-webpack/server.node')
 
 
 async function build() {
-  return new Promise((resolve, reject) => {
+  await new Promise((resolve, reject) => {
     webpack(
       {
         mode: "development",
@@ -154,25 +154,14 @@ async function build() {
   });
 }
 
-async function serveIndex(req, res) {
+async function serveFile(res, directory, pathname, contentType) {
   res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/html');
-  const fileContents = await fs.readFile(path.resolve(__dirname, "./serverIndex.html"), 'utf8');
-  res.end(fileContents)
-}
-
-async function serveScript(req, res) {
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/javascript');
-  const fileContents = await fs.readFile(path.resolve(__dirname, "./build/main.js"), 'utf8');
-  res.end(fileContents)
-}
-
-async function serveScriptClient0(req, res) {
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/javascript');
-  const fileContents = await fs.readFile(path.resolve(__dirname, "./build/client0.main.js"), 'utf8');
-  res.end(fileContents)
+  res.setHeader('Content-Type', contentType);
+  const fileContents = await fs.readFile(
+    path.resolve(__dirname, './' + directory + '/' + pathname),
+    'utf8'
+  );
+  res.end(fileContents);
 }
 
 async function serveReact(req, res) {
@@ -203,16 +192,21 @@ async function main() {
   const port = 1234;
 
   const server = http.createServer(async (req, res) => {
-    switch (req.url) {
-      case '/':
-        return serveIndex(req, res);
-      case '/main.js':
-        return serveScript(req, res);
-      case '/client0.main.js':
-        return serveScriptClient0(req, res);
-     case '/react':
-        return serveReact(req, res);
+    const url = new URL(req.url, 'http://localhost:1234/');
+
+    if (url.pathname === '/') {
+      return serveFile(res, '.', 'serverIndex.html', 'text/html');
+    } else if (url.pathname.endsWith('.js')) {
+      return serveFile(res, 'build', url.pathname, 'text/javascript');
+    } else if (url.pathname.endsWith('.css')) {
+      return serveFile(res, '.', url.pathname, 'text/css');
+    } else if (url.pathname === '/react') {
+      return serveReact(req, res);
     }
+
+    res.statusCode = 404;
+    res.setHeader('Content-Type', 'text/html');
+    res.end('Invalid pathname');
   });
 
   server.listen(port, hostname);
@@ -371,7 +365,7 @@ const HTML_CODE = `
     <meta charset="utf-8" />
     <meta name="description" content="React with Server Components demo">
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="styles.css" />
     <title>Demo</title>
     <script defer src="main.js"></script>
   </head>
