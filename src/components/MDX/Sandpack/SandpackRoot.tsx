@@ -574,13 +574,13 @@ function SandboxShell({
         )}>
         <Editor lintExtensions={lintExtensions} />
         {/* This preview is broken: */}
-        {/* <Preview
+        <Preview
           className="order-last xl:order-2"
           isExpanded={isExpanded}
           lintErrors={lintErrors}
-        /> */}
+        />
         {/* this preview works: */}
-        <SandpackPreview />
+        {/* <SandpackPreview /> */}
       </SandpackLayout>
     </div>
   );

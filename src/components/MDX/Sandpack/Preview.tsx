@@ -97,11 +97,13 @@ export function Preview({
       let timeout: ReturnType<typeof setTimeout>;
 
       const unsubscribe = listen((message) => {
+        console.log(message);
         if (message.type === 'resize') {
+          console.log("resize message sent");
           setComputedAutoHeight(message.height);
         } else if (message.type === 'start') {
           if (message.firstLoad) {
-            setBundlerIsReady(false);
+            setBundlerIsReady(true);
           }
 
           /**
@@ -144,7 +146,7 @@ export function Preview({
   // - It should work on mobile.
   // The best way to test it is to actually go through some challenges.
 
-  const hideContent = error || !iframeComputedHeight || !bundlerIsReady;
+  const hideContent = error || /*!iframeComputedHeight ||*/ !bundlerIsReady;
 
   const iframeWrapperPosition = (): CSSProperties => {
     if (hideContent) {
@@ -208,7 +210,7 @@ export function Preview({
           forceLoading={showLoading}
         />
       </div>
-      <SandpackConsole visible={!error} />
+      <SandpackConsole visible={true} />
     </SandpackStack>
   );
 }
