@@ -99,7 +99,7 @@ export function Preview({
       const unsubscribe = listen((message) => {
         console.log(message);
         if (message.type === 'resize') {
-          console.log("resize message sent");
+          console.log('resize message sent');
           setComputedAutoHeight(message.height);
         } else if (message.type === 'start') {
           if (message.firstLoad) {
