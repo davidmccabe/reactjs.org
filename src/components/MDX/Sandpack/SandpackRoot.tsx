@@ -184,6 +184,19 @@ async function serveReact(req, res) {
 
 const http = require('http');
 const fs = require('fs').promises;
+const fsSync = require('fs');
+
+async function watch() {
+  let building = false;
+  const watcher = fsSync.watch(path.resolve(__dirname), {recursive: true}, async (eventType, filename) => {
+    if (!building) {
+      building = true;
+      await build();
+      building = false;
+      // need to also trigger a page refresh I guess
+    }
+  });
+}
 
 async function main() {
   await build();
@@ -210,6 +223,8 @@ async function main() {
   });
 
   server.listen(port, hostname);
+
+  watch();
 }
 
 main();
@@ -404,8 +419,6 @@ export default function ClientRoot({}) {
 }
 `;
 
-
-
 function SandpackRoot(props: SandpackProps) {
   let {children, autorun = true, serverComponents = false} = props;
   const codeSnippets = Children.toArray(children) as React.ReactElement[];
@@ -458,15 +471,15 @@ function SandpackRoot(props: SandpackProps) {
           'server-only': '^0.0.1',
           webpack: '5.76.2',
         },
-        "babel": {
-          "presets": [
+        babel: {
+          presets: [
             [
-              "@babel/preset-react",
+              '@babel/preset-react',
               {
-                "runtime": "automatic"
-              }
-            ]
-          ]
+                runtime: 'automatic',
+              },
+            ],
+          ],
         },
         // scripts: {start: 'node -C foo script.js'},
         scripts: {start: 'node script.js'},
@@ -509,15 +522,15 @@ function SandpackRoot(props: SandpackProps) {
       theme={CustomTheme}
       options={options}
       customSetup={customSetup} /> */}
-       <SandpackProvider
+      <SandpackProvider
         template={template}
         files={files}
         theme={CustomTheme}
         options={options}
-        customSetup={customSetup}> 
-        <Contents providedFiles={Object.keys(files)} />
-        {/* <CustomPreset providedFiles={Object.keys(files)} /> */}
-      </SandpackProvider> 
+        customSetup={customSetup}>
+        {/* <Contents providedFiles={Object.keys(files)} /> */}
+        <CustomPreset providedFiles={Object.keys(files)} />
+      </SandpackProvider>
     </div>
   );
 }
