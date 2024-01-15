@@ -103,7 +103,7 @@ const ReactServerWebpackPlugin = require("react-server-dom-webpack/plugin");
 const path = require("path");
 const React = require('react');
 const ClientRoot = require('./App.js').default;
-
+const ws = require('ws');
 
 const {renderToPipeableStream} = require('react-server-dom-webpack/server.node');
 
@@ -131,8 +131,11 @@ async function build() {
         plugins: [
           new ReactServerWebpackPlugin({ isServer: false }),
         ],
+        stats: 'verbose',
       },
       (err, stats) => {
+        console.log('stats');
+        console.log(stats);
         if (err) {
           console.error(err.stack || err);
           if (err.details) {
@@ -186,6 +189,9 @@ const http = require('http');
 const fs = require('fs').promises;
 const fsSync = require('fs');
 
+const clients = new Map();
+let nextClientID = 0;
+
 async function watch() {
   let building = false;
   const watcher = fsSync.watch(path.resolve(__dirname), {recursive: true}, async (eventType, filename) => {
@@ -193,16 +199,27 @@ async function watch() {
       building = true;
       await build();
       building = false;
-      // need to also trigger a page refresh I guess
     }
+    // TODO may need to build again if we were already building
+    await onFileChanged(filename);
   });
+}
+
+async function onFileChanged(filename) {
+  const fileContents = await fs.readFile(filename, 'utf8');
+  // Due to hybrid components we can't say for sure whether a given file
+  // necessitates a refresh. The only case where it definitely doesn't is if
+  // the whole module is marked with 'use client' -- then we know it's a client-
+  // only leaf node.
+  if (fileContents.match(/^['"]use client['"]/m) == null) {
+    for (client of clients)  {
+      ws.send('refresh');
+    }
+  }
 }
 
 async function main() {
   await build();
-
-  const hostname = '127.0.0.1';
-  const port = 1234;
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost:1234/');
@@ -222,7 +239,14 @@ async function main() {
     res.end('Invalid pathname');
   });
 
-  server.listen(port, hostname);
+  server.listen(1234, '127.0.0.1');
+
+  const socketServer = new ws.Server({ port: 443 })
+  socketServer.on('connection', (ws) => {
+    const id = nextClientID++;
+    clients.set(id, ws);
+    ws.on('close', () => client.delete(id));
+  })
 
   watch();
 }
@@ -267,6 +291,7 @@ import {
   createContext,
   startTransition,
   useContext,
+  useEffect,
   useState,
   use,
 } from "react";
@@ -320,6 +345,25 @@ export function Router() {
       }));
     });
   }
+
+  useEffect(() => {
+    const webSocket = new WebSocket('wss://localhost:443/');
+    webSocket.onmessage = async (event) => {
+      try {
+        const response = await fetch(\`/react?location=\${encodeURIComponent(JSON.stringify(location))}\`);
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+        refresh(response);
+      } catch (e) {
+        setDidError(true);
+        setError(e);
+      }
+    };
+    return () => {
+      webSocket.close();
+    }
+  });
 
   return (
     <RouterContext.Provider value={{ location, navigate, refresh }}>
@@ -470,6 +514,7 @@ function SandpackRoot(props: SandpackProps) {
           'sanitize-html': '^2.10.0',
           'server-only': '^0.0.1',
           webpack: '5.76.2',
+          ws: '^8.16.0',
         },
         babel: {
           presets: [
